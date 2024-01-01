@@ -21,7 +21,7 @@ Analyze a track. This usually takes less than 1 second:
     $ loop-detect track.flac
     {"start": 6.315828, "end": 111.915825, "confidence": 1035}
 
-Analyze, then play in a infinite gapless loop:
+Analyze, then play in an infinite gapless loop:
 
     $ loop-detect -p track.flac
     ...
