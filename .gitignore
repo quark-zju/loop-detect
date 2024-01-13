@@ -1,5 +1,7 @@
 /target
 *.mp3
 *.flac
+*.opus
+*.m4a
 *.html
 Cargo.lock
