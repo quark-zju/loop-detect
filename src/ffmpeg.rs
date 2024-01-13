@@ -72,6 +72,12 @@ impl Default for ProbeInfo {
     }
 }
 
+impl ProbeInfo {
+    fn sample_count_seconds(&self, seconds: f64) -> usize {
+        ((self.sample_rate as f64 * seconds) as usize) * self.channels
+    }
+}
+
 /// Find the sample rate via the `ffprobe` executable.
 pub fn probe(path: &str) -> io::Result<ProbeInfo> {
     let out = Command::new("ffprobe")
@@ -143,8 +149,8 @@ pub fn play(samples: impl IntoIterator<Item = i16>, info: ProbeInfo) -> io::Resu
     Ok(())
 }
 
+/// Play `samples[..end]`, then repeat `samples[start..end]`.
 pub fn play_loop(samples: &[i16], lop: &Loop, info: ProbeInfo) -> io::Result<()> {
-    // Play samples[..end], then repeat samples[start..end]
     let channels = info.channels;
     let iter = samples[..lop.end * channels].iter().copied();
     let iter = iter.chain(
@@ -153,5 +159,26 @@ pub fn play_loop(samples: &[i16], lop: &Loop, info: ProbeInfo) -> io::Result<()>
             .copied()
             .cycle(),
     );
+    play(iter, info)
+}
+
+/// Play in a loop:
+/// - `samples[(end - around_samples)..end]`
+/// - `samples[start..(start + around_samples)]`
+/// - silence for 1 second
+pub fn play_loop_around(
+    samples: &[i16],
+    lop: &Loop,
+    info: ProbeInfo,
+    around: f64,
+) -> io::Result<()> {
+    let channels = info.channels;
+    let end = lop.end * channels;
+    let around = info.sample_count_seconds(around);
+    let mut chunk = samples[end.saturating_sub(around)..end].to_vec();
+    let start = lop.start * channels;
+    chunk.extend_from_slice(&samples[start..((start + around).min(end))]);
+    chunk.resize(chunk.len() + info.sample_count_seconds(1.0), 0);
+    let iter = chunk.into_iter().cycle();
     play(iter, info)
 }

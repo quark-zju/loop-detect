@@ -22,6 +22,9 @@ fn cli() -> io::Result<()> {
     }
     let play = pargs.contains(["-p", "--play"]);
     let debug = pargs.contains("--debug");
+    let around = pargs
+        .opt_value_from_fn(["-A", "--around"], |s| s.parse::<f64>())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let input_file = pargs
         .free_from_str::<String>()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Missing input file."))?;
@@ -58,13 +61,16 @@ fn cli() -> io::Result<()> {
     if let Some(lop) = loops.first() {
         println!(
             "{{\"start\": {}, \"end\": {}, \"confidence\": {}}}",
-            lop.start as f32 / info.sample_rate as f32,
-            lop.end as f32 / info.sample_rate as f32,
+            lop.start as f64 / info.sample_rate as f64,
+            lop.end as f64 / info.sample_rate as f64,
             lop.confidence
         );
         if play {
             eprintln!("Playing...");
-            ffmpeg::play_loop(&samples, lop, info)?;
+            match around {
+                None => ffmpeg::play_loop(&samples, lop, info)?,
+                Some(around) => ffmpeg::play_loop_around(&samples, lop, info, around)?,
+            }
         }
     } else {
         eprintln!("No loop found");
@@ -78,9 +84,10 @@ fn help() -> io::Result<()> {
         "Usage: [options] <audio file>
 
 Options:
-    -h, --help      Print this help message.
-    -p, --play      Play the looped audio. Requires `ffplay`.
-        --debug     Generate a HTML file for debugging.
+    -h, --help         Print this help message.
+    -p, --play         Play the looped audio. Requires `ffplay`.
+    -A, --around SECS  Only play SECS before loop end, and SECS after loop start.
+        --debug        Generate a HTML file for debugging.
 
 Prints the loop information {{\"start\": seconds, \"end\": seconds}}.
 Requires `ffmpeg` to decode `<audio file>`."
