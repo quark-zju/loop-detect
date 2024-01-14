@@ -15,7 +15,7 @@ pub struct Loop {
     /// Exclusive. Index of samples.
     pub end: usize,
     /// Rough confidence of the loop.
-    pub confidence: usize,
+    pub confidence: f32,
     /// For debugging purpose. Related to `end - start` but not the same.
     pub(crate) delta: usize,
 }
@@ -146,7 +146,8 @@ impl LoopDetector {
             }
             let start = pick_start(c.starts) << self.chunk_size_bits;
             let end = start + (c.delta << self.chunk_size_bits);
-            let confidence = c.count;
+            // confidence will be adjusted by fine_tune.
+            let confidence = 0.0;
             let delta = c.delta;
             loops.push(Loop {
                 start,
@@ -204,7 +205,7 @@ impl LoopDetector {
                 Some(v) => v.iter().map(|i| Complex::new(*i as f32, 0.0f32)).collect(),
             };
         let mut best_offset = lop.end - end_left;
-        let mut best_value = f32::MAX;
+        let mut best_value = -1f32;
         let search_start = 0;
         let search_end = end_right - end_left;
         let step = 2;
@@ -217,12 +218,17 @@ impl LoopDetector {
             };
             fft_end_buffer.extend_from_slice(slice);
             fft.process_with_scratch(&mut fft_end_buffer, scratch);
-            let mut value = 0.0f32;
+            let mut total_diff = 0.0f32;
+            let mut total_power = 0.0f32;
             for (a, b) in fft_start_norm.iter().zip(fft_end_buffer.iter()) {
-                let diff = (a - b.norm()).abs();
-                value += diff;
+                let b = b.norm();
+                let diff = (a - b).abs();
+                total_diff += diff;
+                total_power += a.max(b);
             }
-            if value < best_value {
+            let value = 1.0 - (total_diff / total_power);
+            assert!(value >= 0.0 && value <= 1.0);
+            if value > best_value {
                 best_value = value;
                 best_offset = i;
             }
@@ -230,6 +236,7 @@ impl LoopDetector {
 
         let new_end = end_left + best_offset;
         lop.end = new_end;
+        lop.confidence = best_value;
     }
 }
 
