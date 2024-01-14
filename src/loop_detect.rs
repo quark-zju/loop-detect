@@ -208,7 +208,7 @@ impl LoopDetector {
         let mut best_value = -1f32;
         let search_start = 0;
         let search_end = end_right - end_left;
-        let step = 2;
+        let step = 1;
         let mut fft_end_buffer: Vec<Complex<f32>> = Vec::with_capacity(self.chunk_size);
         for i in (search_start..search_end).step_by(step) {
             fft_end_buffer.clear();
