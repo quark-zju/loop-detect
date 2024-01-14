@@ -19,12 +19,21 @@ Requires `ffmpeg` binaries:
 Analyze a track. This usually takes less than 1 second:
 
     $ loop-detect track.flac
-    {"start": 6.315828, "end": 111.915825, "confidence": 1035}
+    {"start": 6.3, "end": 111.9, "confidence": 0.88}
 
 Analyze, then play in an infinite gapless loop:
 
     $ loop-detect -p track.flac
     ...
+
+Analyze multiple files:
+
+    $ loop-detect -q *.flac
+    {"a.flac":{"start":4.2,"end":106.6,"confidence":0.99},"b.flac":null}
+
+To get indented JSON output, use:
+
+    $ loop-detect -q *.flac | python3 -m json.tool
 
 ## Library interface
 
