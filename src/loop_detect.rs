@@ -418,8 +418,8 @@ pub(crate) fn pick_start(starts: &mut [usize]) -> usize {
 
     // Find the "best" rolling average of N frames.
     // By default (chunk_size_bits = 11), for 44k Hz audio,
-    // N = 32 covers (N << chunk_size_bits) / 44100 = 1.49s.
-    let n: usize = 32.min((histogram.len() >> 2).max(2));
+    // N = 128 covers (N << chunk_size_bits) / 44100 = 5.9s.
+    let n: usize = 128.min((histogram.len() >> 2).max(2));
     const EMPTY_PENALITY: usize = 8;
 
     let mut deq = VecDeque::with_capacity(n);
