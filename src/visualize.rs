@@ -24,7 +24,7 @@ impl Visualizer {
 
     pub fn export_html(&self) -> String {
         return format!(
-            "<html><head><style>{}</style><script>{}{}{}</script></head><body>{}</body></html>",
+            "<html><head><meta charset=\"UTF-8\"><style>{}</style><script>{}{}{}</script></head><body>{}</body></html>",
             STYLE, HEAD_JS, self.js, TAIL_JS, self.body,
         );
     }
