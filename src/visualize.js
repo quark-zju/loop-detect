@@ -100,42 +100,42 @@ function render(data, hotPoints, loops, matches) {
       }
       return td;
     };
-    const coloredTd = (value, parentTr = currentTr) => {
+    const coloredTd = (value, parentTr = currentTr, blue = false) => {
       const s = value < 0.05 ? "" : value.toFixed(1);
       const e = td(s, null, parentTr);
       // value: 0 to 100.
       const v = Math.max(0, Math.min(255 - Math.floor(2.55 * value), 255));
-      e.style.backgroundColor = `rgba(${v},${v},255)`;
+      e.style.backgroundColor = `rgb(${v},${v},${blue ? 255 : v})`;
       if (v < 128) {
         e.style.color = "white";
       }
     };
     const effectiveSize = chunkSize / 2;
-    for (let i = 0; i < N; i++) {
-      tr("title`");
-      td(
-        `Fine tune: delta ${delta} => confidence ${confidence.toFixed(3)}`,
-        effectiveSize + 1
-      );
+    tr("title");
+    td(
+      `Fine tune: delta ${delta} => confidence ${confidence.toFixed(3)}`,
+      effectiveSize + 1
+    );
 
+    for (let i = 0; i < N; i++) {
       tr("row-frame");
       td(`Frame ${i + 1}`, effectiveSize + 1);
 
-      const rowA = tr("row-a");
+      const rowA = tr("row-a row-data");
       td("a");
 
-      const rowB = tr("row-b");
+      const rowB = tr("row-b row-data");
       td("b");
 
-      const rowDelta = tr("row-delta");
+      const rowDelta = tr("row-delta row-data");
       td("Δ");
 
       for (let j = 0; j < effectiveSize; j++) {
         const ai = a[i * chunkSize + j];
         const bi = b[i * chunkSize + j];
-        coloredTd(ai, rowA);
-        coloredTd(bi, rowB);
-        coloredTd(Math.abs(ai - bi), rowDelta);
+        coloredTd(ai, rowA, false);
+        coloredTd(bi, rowB, false);
+        coloredTd(Math.abs(ai - bi), rowDelta, true);
       }
     }
 

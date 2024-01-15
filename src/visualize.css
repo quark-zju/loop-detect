@@ -12,7 +12,6 @@ tr.row-frame {
 
 table.best-frames {
   border-collapse: collapse;
-  text-align: right;
 }
 
 table.best-frames td {
@@ -20,6 +19,6 @@ table.best-frames td {
   padding: 0px 2px;
 }
 
-table.best-frames tr.row-frame {
-  text-align: left;
+table.best-frames tr.row-data {
+  text-align: right;
 }
