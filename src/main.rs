@@ -98,7 +98,6 @@ fn cli() -> io::Result<()> {
                     reports.insert(input_file, lop);
                 }
                 Err(e) => {
-                    reports.insert(input_file, None);
                     vprintln!(opts, "{}: {}", input_file, e);
                 }
             }
@@ -113,11 +112,11 @@ fn cli() -> io::Result<()> {
             let reports: BTreeMap<&String, Option<HumanReadableLoop>> = input_files
                 .as_slice()
                 .into_par_iter()
-                .map(|input_file| match process_one(input_file, &opts) {
-                    Ok(lop) => (input_file, lop),
+                .filter_map(|input_file| match process_one(input_file, &opts) {
+                    Ok(lop) => Some((input_file, lop)),
                     Err(e) => {
                         vprintln!(opts, "{}: {}", input_file, e);
-                        (input_file, None)
+                        None
                     }
                 })
                 .collect();
