@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-miniserde = "0.1"
-rayon = "1"
+miniserde = { version = "0.1", optional = true }
+rayon = { version = "1", optional = true }
 rustfft = "6"
-pico-args = "0.5"
+pico-args = { version = "0.5", optional = true }
+
+[features]
+default = ["cli"]
+cli = ["miniserde", "rayon", "pico-args"]

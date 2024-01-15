@@ -1,4 +1,4 @@
-use crate::loop_detect::Loop;
+use loop_detect::Loop;
 use std::io;
 use std::io::Read;
 use std::io::Write;
