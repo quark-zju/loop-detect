@@ -1,5 +1,7 @@
 use miniserde::json;
 use miniserde::Serialize;
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
@@ -50,6 +52,13 @@ fn cli() -> io::Result<()> {
     let play = pargs.contains(["-p", "--play"]);
     let debug = pargs.contains("--debug");
     let quiet = pargs.contains(["-q", "--quiet"]);
+    let jobs: usize = match pargs.opt_value_from_fn(["-j", "--jobs"], |v| v.parse::<usize>()) {
+        Ok(Some(v)) => v,
+        Ok(None) => std::thread::available_parallelism()
+            .map(|v| v.get())
+            .unwrap_or(1),
+        _ => 1,
+    };
     let around = pargs
         .opt_value_from_fn(["-A", "--around"], |s| s.parse::<f64>())
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
@@ -81,17 +90,39 @@ fn cli() -> io::Result<()> {
                 json_str = Some(json::to_string(&lop));
             }
         }
-    } else {
+    } else if jobs <= 1 {
         let mut reports: BTreeMap<&str, Option<HumanReadableLoop>> = BTreeMap::new();
         for input_file in input_files.iter() {
             match process_one(input_file, &opts) {
                 Ok(lop) => {
                     reports.insert(input_file, lop);
                 }
-                Err(e) => vprintln!(opts, "{}: {}", input_file, e),
+                Err(e) => {
+                    reports.insert(input_file, None);
+                    vprintln!(opts, "{}: {}", input_file, e);
+                }
             }
         }
         json_str = Some(json::to_string(&reports));
+    } else {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs.min(input_files.len()))
+            .build()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        pool.install(|| {
+            let reports: BTreeMap<&String, Option<HumanReadableLoop>> = input_files
+                .as_slice()
+                .into_par_iter()
+                .map(|input_file| match process_one(input_file, &opts) {
+                    Ok(lop) => (input_file, lop),
+                    Err(e) => {
+                        vprintln!(opts, "{}: {}", input_file, e);
+                        (input_file, None)
+                    }
+                })
+                .collect();
+            json_str = Some(json::to_string(&reports));
+        })
     }
 
     if let Some(json_str) = json_str {
@@ -175,6 +206,7 @@ Options:
     -A, --around SECS  Only play SECS before loop end, and SECS after loop start.
         --debug        Generate a HTML file for debugging.
     -q, --quiet        Silence verbose (stderr) output.
+    -j, --jobs         CPU cores to use for processing multiple files.
 
 Prints the loop information {{\"start\": seconds, \"end\": seconds, \"confidence\": zero_to_one}}.
 Requires `ffmpeg` to decode `<audio file>`."
