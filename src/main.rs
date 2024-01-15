@@ -132,6 +132,8 @@ fn cli() -> io::Result<()> {
     Ok(())
 }
 
+const MINIMAL_CONFIDENCE: f32 = 0.2;
+
 fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadableLoop>> {
     let mut info = ProbeInfo::default();
     if opts.play {
@@ -165,7 +167,7 @@ fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadable
     }
 
     match loops.first() {
-        Some(lop) if lop.confidence > 0.4 => {
+        Some(lop) if lop.confidence > MINIMAL_CONFIDENCE => {
             let human_loop = HumanReadableLoop {
                 start: lop.start as f32 / info.sample_rate as f32,
                 end: lop.end as f32 / info.sample_rate as f32,
