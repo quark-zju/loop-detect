@@ -289,7 +289,7 @@ impl LoopDetector {
 fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32> {
     // complex -> f32
     let mut buf: Vec<f32> = buf.into_iter().map(|v| v.norm()).collect();
-    // normalize each chunk so volumn (ex. fade out) does not affect comparsion.
+    // normalize each chunk so volumn (ex. fade out) affects comparsion less.
     let effective_size = chunk_size / 2;
     for chunk in buf.chunks_exact_mut(chunk_size) {
         // zero low-freq noise.
@@ -312,8 +312,8 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
         if max < 1e-3 {
             continue;
         }
-        // Scale to max = 100.
-        let scale = 100.0f32 / max;
+        // Attempt to scale to max = 100.
+        let scale = 200.0f32 / (max + 100.0);
         for v in chunk.iter_mut().take(effective_size) {
             *v *= scale;
         }
