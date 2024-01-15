@@ -4,6 +4,7 @@ use rustfft::Fft;
 use rustfft::FftPlanner;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -36,7 +37,7 @@ impl LoopDetector {
 
     pub fn new_with_chunk_size(chunk_size_bits: u8) -> Self {
         let chunk_size = 1 << chunk_size_bits;
-        // About 46ms per chunk.
+        // About 46ms per chunk ((1 << 11) / 44.100).
         let fft = OnceFft::new(chunk_size_bits);
         // About 0.7ms per chunk. Used to align the loop more precisely.
         let fine_fft = OnceFft::new(5);
@@ -376,34 +377,43 @@ pub(crate) fn pick_start(starts: &mut [usize]) -> usize {
         histogram
     };
 
-    let mut block_start = 0usize; // inclusive
-    let mut block_end = 0usize; // inclusive
-    let mut block_total = 0usize;
-    const GAP_THRESHOLD: usize = 3; // number of empty slots + 1
-    const BLOCK_SIZE_THRESHOLD: usize = 6; // number of continuous matches
-    const BLOCK_AVERAGE_THRESHOLD: usize = 2;
+    // Find the "best" rolling average of N frames.
+    // By default (chunk_size_bits = 11), for 44k Hz audio,
+    // N = 32 covers (N << chunk_size_bits) / 44100 = 1.49s.
+    let n: usize = 32.min((histogram.len() >> 2).max(2));
+    const EMPTY_PENALITY: usize = 8;
+
+    let mut deq = VecDeque::with_capacity(n);
+    let mut rolling_total: usize = 0;
+    let mut rolling_empty: usize = 0;
+    let mut best_total = 0;
+    let mut best_empty = n;
+    let mut best_offset = 0;
     for (i, v) in histogram.iter().enumerate() {
         let v = *v;
-        if i > block_end + GAP_THRESHOLD {
-            // Gap. Start a new block.
-            block_start = i;
-            block_end = i;
-            block_total = 1;
-        } else if v > 0 {
-            block_total += v;
-            block_end = i;
-            let block_size = block_end - block_start + 1;
-            if block_size >= BLOCK_SIZE_THRESHOLD
-                && block_total >= BLOCK_AVERAGE_THRESHOLD * block_size
-            {
-                // Seems good enough.
-                return block_start + starts[0];
+        if deq.len() >= n {
+            if let Some(v) = deq.pop_front() {
+                rolling_total -= v;
+                if v == 0 {
+                    rolling_empty -= 1;
+                }
             }
+        }
+        deq.push_back(v);
+        rolling_total += v;
+        if v == 0 {
+            rolling_empty += 1;
+        }
+
+        if rolling_total + best_empty * EMPTY_PENALITY > best_total + rolling_empty * EMPTY_PENALITY
+        {
+            best_total = rolling_total;
+            best_empty = rolling_empty;
+            best_offset = i.saturating_sub(deq.len());
         }
     }
 
-    // Fallback
-    starts[0]
+    starts[0] + best_offset
 }
 
 #[derive(Copy, Clone, Default)]
