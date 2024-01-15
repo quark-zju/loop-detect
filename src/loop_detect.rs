@@ -269,6 +269,13 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
         for v in chunk.iter_mut().take(chunk_size >> 8) {
             *v = 0.0;
         }
+        // zero high-freq potential noise (ex. MP3 artifacts).
+        for v in chunk
+            .iter_mut()
+            .skip(effective_size - (effective_size >> 2))
+        {
+            *v = 0.0;
+        }
         let mut max: f32 = 0.0;
         for &v in chunk.iter().take(effective_size) {
             if v > max {
@@ -280,13 +287,9 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
         }
         // Scale to max = 100.
         let scale = 100.0f32 / max;
-        chunk.iter_mut().enumerate().for_each(|(i, v)| {
-            if i < effective_size {
-                *v *= scale;
-            } else {
-                *v = 0.0;
-            }
-        });
+        for v in chunk.iter_mut().take(effective_size) {
+            *v *= scale;
+        }
     }
     buf
 }
