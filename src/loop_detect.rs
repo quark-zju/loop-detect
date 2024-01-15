@@ -4,7 +4,6 @@ use rustfft::Fft;
 use rustfft::FftPlanner;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -84,6 +83,7 @@ fn find_potential_loops(
         .collect();
     let afft = fft.get_fft();
     afft.process_with_scratch(&mut fft_buffer, &mut fft.get_scratch());
+    let fft_buffer = normalize_complex_chunks(&fft_buffer, chunk_size);
 
     // Figure out `hash_to_timestamp` and `delta_to_starts`.
     let mut hash_to_timestamp: HashMap<u64, Vec<usize>> = Default::default();
@@ -153,7 +153,7 @@ fn find_potential_loops(
         if c.count < count_threshold {
             break;
         }
-        let start = pick_start(c.starts) << chunk_size_bits;
+        let start = pick_start(c.starts, &fft_buffer, c.delta, chunk_size_bits) << chunk_size_bits;
         let end = start + (c.delta << chunk_size_bits);
         // confidence will be adjusted by fine_tune.
         let confidence = 0.0;
@@ -284,14 +284,7 @@ fn fine_tune(
         afft.process_with_scratch(&mut fft_end_buffer, scratch);
 
         let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
-        let mut total_diff = 0.0f32;
-        let mut total_power = 0.0f32;
-        for (a, b) in fft_start_norm.iter().zip(buf) {
-            let diff = (a - b).abs();
-            total_diff += diff;
-            total_power += a.max(b);
-        }
-        let value = 1.0 - (total_diff / total_power);
+        let value = calculate_similarity(&fft_start_norm, &buf);
         assert!(value >= 0.0 && value <= 1.0);
         if value > best_value {
             best_value = value;
@@ -340,7 +333,7 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
             continue;
         }
         // Attempt to scale to max = 100, with a log-scale volumn.
-        let scale = (100.0f32 + max.log10()) / max;
+        let scale = (100.0f32 + max.log10() * 2.0) / max;
         for v in chunk.iter_mut().take(effective_size) {
             *v *= scale;
         }
@@ -351,7 +344,7 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
 /// Find the indexes of the "hot points".
 /// For a typical 44100 Hz audio, with 2048 chunk size, the first 1024 values are useful,
 /// and each value represents about 22 (22050 / 1024) Hz range.
-pub(crate) fn find_hot_bands(fft_buffer: &[Complex<f32>]) -> HotBands {
+pub(crate) fn find_hot_bands(fft_buffer: &[f32]) -> HotBands {
     // Find top 3 points and their indexes.
     let mut top = [(0, 0.0f32); 3];
     // Attempt to skip nearby points.
@@ -359,7 +352,7 @@ pub(crate) fn find_hot_bands(fft_buffer: &[Complex<f32>]) -> HotBands {
     // Skip (less interesting) low frequency noise. ">> 8" skips <86 Hz for 44k Hz audio.
     let lower_band = fft_buffer.len() >> 8;
     for i in lower_band..(fft_buffer.len() >> 1) {
-        let v = fft_buffer[i].norm();
+        let v = fft_buffer[i];
         if v > top[0].1 {
             if i >= top[0].0 + short_distance_band {
                 top[2] = top[1];
@@ -405,81 +398,78 @@ pub(crate) fn find_hot_bands(fft_buffer: &[Complex<f32>]) -> HotBands {
 ///
 /// Example track that needs this:
 /// Rainbowdragoneyes/(2018) The Messenger OST - Disc II- The Future/26 The Corrupted Future
-pub(crate) fn pick_start(starts: &mut [usize]) -> usize {
+pub(crate) fn pick_start(
+    starts: &mut [usize],
+    fft_buffer: &[f32],
+    delta_frame: usize,
+    chunk_size_bits: u8,
+) -> usize {
     assert!(!starts.is_empty());
-    // Histogram:
-    //
-    //   #####  #  #    #######  ##
-    //   #               ######   #
-    //                      # #
-    //                        #
-    //                  ^
-    //                  block start
-    // Find the first "block":
-    // - Width >= BLOCK_SIZE_THRESHOLD.
-    // - Average value >= BLOCK_AVERAGE_THRESHOLD.
-    // - Only have small (< GAP_THRESHOLD) gaps.
-    let histogram: Vec<usize> = {
-        starts.sort_unstable();
-        let mut histogram: Vec<usize> = Vec::new();
-        let mut count = 0;
-        let mut last = 0;
-        for start in starts.iter().copied() {
-            if start > last {
-                histogram.push(count);
-                for _i in last + 1..start {
-                    histogram.push(0); // gap
-                }
-                count = 1;
-                last = start;
-            } else {
-                debug_assert_eq!(start, last);
-                count += 1;
-            }
-        }
-        if count > 0 {
-            histogram.push(count);
-        }
-        histogram
-    };
 
-    // Find the "best" rolling average of N frames.
-    // By default (chunk_size_bits = 11), for 44k Hz audio,
-    // N = 128 covers (N << chunk_size_bits) / 44100 = 5.9s.
-    let n: usize = 128.min((histogram.len() >> 2).max(2));
-    const EMPTY_PENALITY: usize = 8;
+    // Find the "best" by sliding and comparing N frames.
+    // By default N = 4, chunk_size_bits = 11, for 44k Hz audio,
+    // the N frames cover: (N << chunk_size_bits) / 44100 = 0.18s.
+    const N: usize = 4;
 
-    let mut deq = VecDeque::with_capacity(n);
-    let mut rolling_total: usize = 0;
-    let mut rolling_empty: usize = 0;
-    let mut best_total = 0;
-    let mut best_empty = n;
-    let mut best_offset = 0;
-    for (i, v) in histogram.iter().enumerate() {
-        let v = *v;
-        if deq.len() >= n {
-            if let Some(v) = deq.pop_front() {
-                rolling_total -= v;
-                if v == 0 {
-                    rolling_empty -= 1;
-                }
-            }
-        }
-        deq.push_back(v);
-        rolling_total += v;
-        if v == 0 {
-            rolling_empty += 1;
+    starts.sort_unstable();
+    let mut last_start = 0;
+    let mut best_value = 0f32;
+    let mut best_offset = starts.first().copied().unwrap_or_default();
+    for &mut start in starts {
+        if start <= last_start {
+            continue;
         }
 
-        if rolling_total + best_empty * EMPTY_PENALITY > best_total + rolling_empty * EMPTY_PENALITY
-        {
-            best_total = rolling_total;
-            best_empty = rolling_empty;
-            best_offset = i.saturating_sub(deq.len());
+        let end = start + delta_frame;
+
+        let start_range = (start << chunk_size_bits)..((start + N) << chunk_size_bits);
+        let end_range = (end << chunk_size_bits)..((end + N) << chunk_size_bits);
+        let a = match fft_buffer.get(start_range) {
+            None => break,
+            Some(v) => v,
+        };
+        let b = match fft_buffer.get(end_range) {
+            None => break,
+            Some(v) => v,
+        };
+        let value = calculate_similarity(a, b);
+        if value > best_value {
+            best_value = value;
+            best_offset = start;
         }
+
+        last_start = start;
     }
 
-    starts[0] + best_offset
+    best_offset
+}
+
+fn calculate_similarity(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len());
+    let mut total_diff = 0.0f32;
+    let mut total_power = 0.0f32;
+    for (&a, &b) in a.iter().zip(b) {
+        let diff = (a - b).abs();
+        total_diff += diff;
+        total_power += a.max(b);
+    }
+    1.0 - (total_diff / total_power)
+}
+
+#[allow(dead_code)]
+fn best_similiarity(a: &[f32], sliding_b: &[f32]) -> (f32, usize) {
+    let mut best_value = 0.0f32;
+    let mut best_offset = 0;
+    assert!(sliding_b.len() >= a.len());
+    for i in 0..=(sliding_b.len() - a.len()) {
+        let b = &sliding_b[i..i + a.len()];
+        let value = calculate_similarity(a, b);
+        if value > best_value {
+            best_value = value;
+            best_offset = i;
+        }
+    }
+    (best_value, best_offset)
 }
 
 #[derive(Copy, Clone, Default)]

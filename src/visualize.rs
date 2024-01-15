@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::loop_detect::find_hot_bands;
 use crate::loop_detect::Loop;
-use rustfft::num_complex::Complex;
 
 pub struct Visualizer {
     body: String,
@@ -29,16 +28,13 @@ impl Visualizer {
         );
     }
 
-    pub(crate) fn push_fft_data(&mut self, data: &[Complex<f32>], chunk_size: usize) {
+    pub(crate) fn push_fft_data(&mut self, data: &[f32], chunk_size: usize) {
         self.push_js("const data = [\n");
         let mut hot_points_str = String::new();
         for chunk in data.chunks_exact(chunk_size) {
             let hot_points = find_hot_bands(chunk);
             hot_points_str.push_str(&format!("{:?},", hot_points.as_slice()));
-            let f32_array = chunk[..chunk_size / 2]
-                .iter()
-                .map(|v| v.norm())
-                .collect::<Vec<_>>();
+            let f32_array = &chunk[..chunk_size / 2];
             self.push_js(&format!("  new Float32Array({:?}),", f32_array));
         }
         self.push_js("];\n");

@@ -11,7 +11,8 @@ function render(data, hotPoints, loops, matches) {
   data.forEach((chunk, x) => {
     chunk.forEach((value, j) => {
       const y = l - j;
-      const color = Math.floor(Math.min(Math.log2(value) * 10, 255));
+      // value: roughly 0 to 128.
+      const color = Math.floor(Math.min(value * 2, 255));
       ctx.fillStyle = `rgb(${color}, ${color}, ${color})`;
       ctx.fillRect(x, y, 1, 1);
     });
@@ -103,8 +104,8 @@ function render(data, hotPoints, loops, matches) {
     const coloredTd = (value, parentTr = currentTr, blue = false) => {
       const s = value < 0.05 ? "" : value.toFixed(1);
       const e = td(s, null, parentTr);
-      // value: 0 to 100.
-      const v = Math.max(0, Math.min(255 - Math.floor(2.55 * value), 255));
+      // value: roughly 0 to 128.
+      const v = Math.max(0, Math.min(255 - Math.floor(2 * value), 255));
       e.style.backgroundColor = `rgb(${v},${v},${blue ? 255 : v})`;
       if (v < 128) {
         e.style.color = "white";
