@@ -87,46 +87,47 @@ function render(data, hotPoints, loops, matches, bestFrames) {
       domTable.appendChild(tr);
       return tr;
     };
-    const td = (text, colspan) => {
+    const td = (text, colspan, parentTr = currentTr) => {
       const td = document.createElement("td");
       td.innerText = text;
       if (colspan != null) {
         td.colSpan = colspan;
       }
-      if (currentTr != null) {
-        currentTr.appendChild(td);
+      if (parentTr != null) {
+        parentTr.appendChild(td);
       }
       return td;
+    };
+    const coloredTd = (value, parentTr = currentTr) => {
+      const s = value < 0.05 ? "" : value.toFixed(1);
+      const e = td(s, null, parentTr);
+      // value: 0 to 100.
+      const v = Math.max(0, Math.min(255 - Math.floor(2.55 * value), 255));
+      e.style.backgroundColor = `rgba(${v},${v},255)`;
+      if (v < 128) {
+        e.style.color = "white";
+      }
     };
     const effectiveSize = chunkSize / 2;
     for (let i = 0; i < N; i++) {
       tr("row-frame");
       td(`Frame ${i + 1}`, effectiveSize + 1);
 
-      tr("row-a");
+      const rowA = tr("row-a");
       td("a");
-      for (let j = 0; j < effectiveSize; j++) {
-        td(a[i * chunkSize + j].toFixed(1));
-      }
 
-      tr("row-b");
+      const rowB = tr("row-b");
       td("b");
-      for (let j = 0; j < effectiveSize; j++) {
-        td(b[i * chunkSize + j].toFixed(1));
-      }
 
-      tr("row-delta");
+      const rowDelta = tr("row-delta");
       td("Δ");
+
       for (let j = 0; j < effectiveSize; j++) {
         const ai = a[i * chunkSize + j];
         const bi = b[i * chunkSize + j];
-        const d = Math.abs(ai - bi);
-        const e = td(d.toFixed(1));
-        const v = Math.max(0, Math.min(255 - Math.floor(25 * d), 255));
-        e.style.backgroundColor = `rgba(${v},${v},255)`;
-        if (v < 128) {
-          e.style.color = "white";
-        }
+        coloredTd(ai, rowA);
+        coloredTd(bi, rowB);
+        coloredTd(Math.abs(ai - bi), rowDelta);
       }
     }
 
