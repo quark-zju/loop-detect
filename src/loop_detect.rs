@@ -50,152 +50,174 @@ impl LoopDetector {
         self
     }
 
-    /// Find potential loops. The first loop is the most likely one and is fine tuned.
-    /// `samples` should be Mono. Use `maybe_downmix` to convert Stereo to Mono.
     pub fn find_loops(&mut self, samples: &[i16]) -> Vec<Loop> {
-        // Use rustfft to compute the FFT of the samples.
-        // For each FFT frame, generate some hashes. Consider the previous frame to make hash more unique.
-        // Maintain a multiple map from the hashes to timestamps (FFT frames).
-        // If a hash appears in the map, it might match a previous timestamp.
-        // Maintain another map from the timestamp delta to (the count of matched hashes, the start timestamp).
-        // The ones of the largest matched count are likely loops.
-
-        // Truncate to CHUNK_SIZE.
-        let chunk_size = self.fft.chunk_size();
-        let chunk_size_bits = self.fft.chunk_size_bits;
-        let chunk_len = samples.len() >> chunk_size_bits;
-        let samples = &samples[..chunk_len << chunk_size_bits];
-
-        // FFT.
-        let mut fft_buffer: Vec<Complex<f32>> = samples
-            .iter()
-            .map(|i| Complex::new(*i as f32, 0.0f32))
-            .collect();
-        let fft = self.fft.get_fft();
-        fft.process_with_scratch(&mut fft_buffer, &mut self.fft.get_scratch());
-
-        // Figure out `hash_to_timestamp` and `delta_to_starts`.
-        let mut hash_to_timestamp: HashMap<u64, Vec<usize>> = Default::default();
-        let mut delta_to_starts: HashMap<usize, Vec<usize>> = Default::default();
-
-        let min_time_delta = chunk_len / 2;
-        let mut last_hot_bands = HotBands::default();
-        for (i, chunk) in fft_buffer.chunks_exact(chunk_size).enumerate() {
-            let hot_bands = find_hot_bands(chunk);
-            for &last_band in last_hot_bands.as_slice() {
-                for &band in hot_bands.as_slice() {
-                    let full_hash: u64 = (last_band as u64) | ((band as u64).wrapping_shl(32));
-                    match hash_to_timestamp.entry(full_hash) {
-                        Entry::Occupied(mut e) => {
-                            // Avoid O(N^2) by limiting the count of previous samples.
-                            const MAX_PREVIOUS: usize = 60;
-                            for &previous_timestamp in e.get().iter().take(MAX_PREVIOUS) {
-                                let delta = i - previous_timestamp;
-                                // Exclude too short loops.
-                                if delta > min_time_delta {
-                                    delta_to_starts
-                                        .entry(delta)
-                                        .or_default()
-                                        .push(previous_timestamp);
-                                }
-                            }
-                            e.get_mut().push(i);
-                        }
-                        Entry::Vacant(e) => {
-                            e.insert(vec![i]);
-                        }
-                    }
-                }
-            }
-            last_hot_bands = hot_bands;
-        }
-
-        // Find the max count in `delta_to_starts`.
-        #[derive(Debug)]
-        struct Count<'a> {
-            delta: usize,
-            count: usize,
-            starts: &'a mut [usize],
-        }
-        let mut counts: Vec<Count> = delta_to_starts
-            .iter_mut()
-            .map(|(delta, starts)| {
-                let delta = *delta;
-                let count = starts.len();
-                Count {
-                    delta,
-                    count,
-                    starts,
-                }
-            })
-            .collect();
-        counts.sort_unstable_by_key(|v| -(v.count as isize));
-        counts.truncate(5);
-
-        let mut loops = Vec::new();
-        let count_threshold = match counts.first() {
-            None => return loops,
-            Some(v) => v.count / 2,
-        };
-
-        for c in &mut counts {
-            if c.count < count_threshold {
-                break;
-            }
-            let start = pick_start(c.starts) << chunk_size_bits;
-            let end = start + (c.delta << chunk_size_bits);
-            // confidence will be adjusted by fine_tune.
-            let confidence = 0.0;
-            let delta = c.delta;
-            loops.push(Loop {
-                start,
-                end,
-                confidence,
-                delta,
-            });
-        }
-
-        // Fine tune, starting with the first loop.
-        let mut best_confidence = 0f32;
-        let mut best_index = 0;
-        let mut attempted = vec![false; loops.len()];
-        for i in 0..loops.len() {
-            if attempted[i] {
-                continue;
-            }
-            let lop = &mut loops[i];
-            fine_tune(&mut self.fine_fft, samples, lop, self.vis.as_mut());
-            if lop.confidence > best_confidence {
-                best_confidence = lop.confidence;
-                best_index = i;
-            }
-            if lop.confidence > 0.9 {
-                // Good enough. Do not try other potential loops.
-                break;
-            } else {
-                // Mark similiar "delta" loops as attempted.
-                let delta = lop.delta;
-                for j in i + 1..loops.len() {
-                    if loops[j].delta.abs_diff(delta) < 10 {
-                        attempted[j] = true;
-                    }
-                }
-            }
-        }
-
-        // Swap the loops so the "best confidence" is at the first.
-        if best_index > 0 {
-            loops.swap(0, best_index);
-        }
-
-        if let Some(vis) = self.vis.as_mut() {
-            vis.push_fft_data(&fft_buffer, chunk_size);
-            vis.push_loops(&loops);
-            vis.push_matches(&delta_to_starts);
-        }
-
+        let loops = find_potential_loops(&mut self.fft, samples, &mut self.vis);
+        let loops = fine_tune_loops(&mut self.fine_fft, samples, loops, &mut self.vis);
         loops
     }
+}
+
+/// Find potential loops. The first loop is the most likely one and is fine tuned.
+/// `samples` should be Mono. Use `maybe_downmix` to convert Stereo to Mono.
+fn find_potential_loops(
+    fft: &mut OnceFft,
+    samples: &[i16],
+    vis: &mut Option<Visualizer>,
+) -> Vec<Loop> {
+    // Use rustfft to compute the FFT of the samples.
+    // For each FFT frame, generate some hashes. Consider the previous frame to make hash more unique.
+    // Maintain a multiple map from the hashes to timestamps (FFT frames).
+    // If a hash appears in the map, it might match a previous timestamp.
+    // Maintain another map from the timestamp delta to (the count of matched hashes, the start timestamp).
+    // The ones of the largest matched count are likely loops.
+
+    // Truncate to CHUNK_SIZE.
+    let chunk_size = fft.chunk_size();
+    let chunk_size_bits = fft.chunk_size_bits;
+    let chunk_len = samples.len() >> chunk_size_bits;
+    let samples = &samples[..chunk_len << chunk_size_bits];
+
+    // FFT.
+    let mut fft_buffer: Vec<Complex<f32>> = samples
+        .iter()
+        .map(|i| Complex::new(*i as f32, 0.0f32))
+        .collect();
+    let afft = fft.get_fft();
+    afft.process_with_scratch(&mut fft_buffer, &mut fft.get_scratch());
+
+    // Figure out `hash_to_timestamp` and `delta_to_starts`.
+    let mut hash_to_timestamp: HashMap<u64, Vec<usize>> = Default::default();
+    let mut delta_to_starts: HashMap<usize, Vec<usize>> = Default::default();
+
+    let min_time_delta = chunk_len / 2;
+    let mut last_hot_bands = HotBands::default();
+    for (i, chunk) in fft_buffer.chunks_exact(chunk_size).enumerate() {
+        let hot_bands = find_hot_bands(chunk);
+        for &last_band in last_hot_bands.as_slice() {
+            for &band in hot_bands.as_slice() {
+                let full_hash: u64 = (last_band as u64) | ((band as u64).wrapping_shl(32));
+                match hash_to_timestamp.entry(full_hash) {
+                    Entry::Occupied(mut e) => {
+                        // Avoid O(N^2) by limiting the count of previous samples.
+                        const MAX_PREVIOUS: usize = 60;
+                        for &previous_timestamp in e.get().iter().take(MAX_PREVIOUS) {
+                            let delta = i - previous_timestamp;
+                            // Exclude too short loops.
+                            if delta > min_time_delta {
+                                delta_to_starts
+                                    .entry(delta)
+                                    .or_default()
+                                    .push(previous_timestamp);
+                            }
+                        }
+                        e.get_mut().push(i);
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert(vec![i]);
+                    }
+                }
+            }
+        }
+        last_hot_bands = hot_bands;
+    }
+
+    // Find the max count in `delta_to_starts`.
+    #[derive(Debug)]
+    struct Count<'a> {
+        delta: usize,
+        count: usize,
+        starts: &'a mut [usize],
+    }
+    let mut counts: Vec<Count> = delta_to_starts
+        .iter_mut()
+        .map(|(delta, starts)| {
+            let delta = *delta;
+            let count = starts.len();
+            Count {
+                delta,
+                count,
+                starts,
+            }
+        })
+        .collect();
+    counts.sort_unstable_by_key(|v| -(v.count as isize));
+    counts.truncate(5);
+
+    let mut loops = Vec::new();
+    let count_threshold = match counts.first() {
+        None => return loops,
+        Some(v) => v.count / 2,
+    };
+
+    for c in &mut counts {
+        if c.count < count_threshold {
+            break;
+        }
+        let start = pick_start(c.starts) << chunk_size_bits;
+        let end = start + (c.delta << chunk_size_bits);
+        // confidence will be adjusted by fine_tune.
+        let confidence = 0.0;
+        let delta = c.delta;
+        loops.push(Loop {
+            start,
+            end,
+            confidence,
+            delta,
+        });
+    }
+
+    if let Some(vis) = vis {
+        vis.push_fft_data(&fft_buffer, chunk_size);
+        vis.push_matches(&delta_to_starts);
+    }
+
+    loops
+}
+
+fn fine_tune_loops(
+    fine_fft: &mut OnceFft,
+    samples: &[i16],
+    mut loops: Vec<Loop>,
+    vis: &mut Option<Visualizer>,
+) -> Vec<Loop> {
+    // Fine tune, starting with the first loop.
+    let mut best_confidence = 0f32;
+    let mut best_index = 0;
+    let mut attempted = vec![false; loops.len()];
+    for i in 0..loops.len() {
+        if attempted[i] {
+            continue;
+        }
+        let lop = &mut loops[i];
+        fine_tune(fine_fft, samples, lop, vis);
+        if lop.confidence > best_confidence {
+            best_confidence = lop.confidence;
+            best_index = i;
+        }
+        if lop.confidence > 0.9 {
+            // Good enough. Do not try other potential loops.
+            break;
+        } else {
+            // Mark similiar "delta" loops as attempted.
+            let delta = lop.delta;
+            for j in i + 1..loops.len() {
+                if loops[j].delta.abs_diff(delta) < 10 {
+                    attempted[j] = true;
+                }
+            }
+        }
+    }
+
+    // Swap the loops so the "best confidence" is at the first.
+    if best_index > 0 {
+        loops.swap(0, best_index);
+    }
+
+    if let Some(vis) = vis.as_mut() {
+        vis.push_loops(&loops);
+    }
+
+    loops
 }
 
 /// Slightly shift `lop.end` so it can better align with `start`.
@@ -203,9 +225,9 @@ fn fine_tune(
     fine_fft: &mut OnceFft,
     samples: &[i16],
     lop: &mut Loop,
-    vis: Option<&mut Visualizer>,
+    vis: &mut Option<Visualizer>,
 ) {
-    let fft = fine_fft.get_fft();
+    let afft = fine_fft.get_fft();
     let chunk_size_bits = fine_fft.chunk_size_bits;
     let chunk_size = fine_fft.chunk_size();
     let scratch = fine_fft.get_scratch();
@@ -231,7 +253,7 @@ fn fine_tune(
             .iter()
             .map(|i| Complex::new(*i as f32, 0.0f32))
             .collect();
-        fft.process_with_scratch(&mut fft_start_buffer, scratch);
+        afft.process_with_scratch(&mut fft_start_buffer, scratch);
         normalize_complex_chunks(&fft_start_buffer, chunk_size)
     };
 
@@ -259,7 +281,7 @@ fn fine_tune(
             Some(v) => v,
         };
         fft_end_buffer.extend_from_slice(slice);
-        fft.process_with_scratch(&mut fft_end_buffer, scratch);
+        afft.process_with_scratch(&mut fft_end_buffer, scratch);
 
         let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
         let mut total_diff = 0.0f32;
@@ -277,11 +299,11 @@ fn fine_tune(
         }
     }
 
-    if let Some(vis) = vis {
+    if let Some(vis) = vis.as_mut() {
         fft_end_buffer.clear();
         fft_end_buffer
             .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
-        fft.process_with_scratch(&mut fft_end_buffer, scratch);
+        afft.process_with_scratch(&mut fft_end_buffer, scratch);
         let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
         vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, lop.delta, best_value);
     }
