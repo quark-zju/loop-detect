@@ -1,0 +1,21 @@
+body {
+  font-family: monospace;
+}
+
+tr.row-frame {
+  background: #eeeeee;
+}
+
+table.best-frames {
+  border-collapse: collapse;
+  text-align: right;
+}
+
+table.best-frames td {
+  border: 1px solid #eeeeee;
+  padding: 0px 2px;
+}
+
+table.best-frames tr.row-frame {
+  text-align: left;
+}

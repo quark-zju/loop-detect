@@ -182,7 +182,11 @@ impl LoopDetector {
         //                                       ^best match
 
         // FFT for the start chunk.
-        let compare_size = self.chunk_size * 4;
+        let compare_chunk_count = ((samples.len() - lop.start) >> self.chunk_size_bits).min(4);
+        if compare_chunk_count < 2 {
+            return;
+        }
+        let compare_size = self.chunk_size * compare_chunk_count;
         let fft_start_norm: Vec<f32> = {
             let sample_start = match samples.get(lop.start..lop.start + compare_size) {
                 None => return,
@@ -193,12 +197,15 @@ impl LoopDetector {
                 .map(|i| Complex::new(*i as f32, 0.0f32))
                 .collect();
             fft.process_with_scratch(&mut fft_start_buffer, scratch);
-            fft_start_buffer.into_iter().map(|v| v.norm()).collect()
+            normalize_complex_chunks(&fft_start_buffer, self.chunk_size)
         };
 
         // Brute force search in range.
-        let end_left = lop.end.saturating_sub(self.chunk_size).max(lop.start);
-        let end_right = end_left + self.chunk_size * 2;
+        let end_left = lop
+            .end
+            .saturating_sub(self.chunk_size * compare_chunk_count)
+            .max(lop.start);
+        let end_right = end_left + self.chunk_size * 2 * compare_chunk_count;
         let end_search_range: Vec<Complex<f32>> =
             match samples.get(end_left..end_right + compare_size) {
                 None => return,
@@ -210,6 +217,7 @@ impl LoopDetector {
         let search_end = end_right - end_left;
         let step = 1;
         let mut fft_end_buffer: Vec<Complex<f32>> = Vec::with_capacity(self.chunk_size);
+        let scratch = self.fine_fft.get_scratch();
         for i in (search_start..search_end).step_by(step) {
             fft_end_buffer.clear();
             let slice = match end_search_range.get(i..i + compare_size) {
@@ -218,10 +226,11 @@ impl LoopDetector {
             };
             fft_end_buffer.extend_from_slice(slice);
             fft.process_with_scratch(&mut fft_end_buffer, scratch);
+
+            let buf = normalize_complex_chunks(&fft_end_buffer, self.chunk_size);
             let mut total_diff = 0.0f32;
             let mut total_power = 0.0f32;
-            for (a, b) in fft_start_norm.iter().zip(fft_end_buffer.iter()) {
-                let b = b.norm();
+            for (a, b) in fft_start_norm.iter().zip(buf) {
                 let diff = (a - b).abs();
                 total_diff += diff;
                 total_power += a.max(b);
@@ -234,10 +243,42 @@ impl LoopDetector {
             }
         }
 
+        if let Some(vis) = self.vis.as_mut() {
+            fft_end_buffer.clear();
+            fft_end_buffer
+                .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
+            fft.process_with_scratch(&mut fft_end_buffer, scratch);
+            let buf = normalize_complex_chunks(&fft_end_buffer, self.chunk_size);
+            vis.push_best_frames(&fft_start_norm, &buf, self.chunk_size);
+        }
+
         let new_end = end_left + best_offset;
         lop.end = new_end;
         lop.confidence = best_value;
     }
+}
+
+fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32> {
+    // complex -> f32
+    let mut buf: Vec<f32> = buf.into_iter().map(|v| v.norm_sqr()).collect();
+    // normalize each chunk so volumn (ex. fade out) does not affect comparsion.
+    let effective_size = chunk_size / 2;
+    for chunk in buf.chunks_exact_mut(chunk_size) {
+        let total: f32 = chunk.iter().take(effective_size).sum();
+        if total.abs() < 1e-3 {
+            continue;
+        }
+        // Scale to total = chunk_size.
+        let scale = (effective_size as f32) / total;
+        chunk.iter_mut().enumerate().for_each(|(i, v)| {
+            if i < effective_size {
+                *v *= scale;
+            } else {
+                *v = 0.0;
+            }
+        });
+    }
+    buf
 }
 
 /// Find the indexes of the "hot points".

@@ -11,7 +11,8 @@ pub struct Visualizer {
 
 static HEAD_JS: &str = include_str!("visualize.js");
 static TAIL_JS: &str =
-    "window.addEventListener('load', () => render(data, hotPoints, loops, matches));";
+    "window.addEventListener('load', () => render(data, hotPoints, loops, matches, bestFrames));";
+static STYLE: &str = include_str!("visualize.css");
 
 impl Visualizer {
     pub fn new() -> Self {
@@ -23,8 +24,8 @@ impl Visualizer {
 
     pub fn export_html(&self) -> String {
         return format!(
-            "<html><head><script>{}{}{}</script></head><body>{}</body></html>",
-            HEAD_JS, self.js, TAIL_JS, self.body,
+            "<html><head><style>{}</style><script>{}{}{}</script></head><body>{}</body></html>",
+            STYLE, HEAD_JS, self.js, TAIL_JS, self.body,
         );
     }
 
@@ -68,6 +69,14 @@ impl Visualizer {
             self.push_js(&format!("  [{}, {:?}],\n", delta, starts,));
         }
         self.push_js("]);\n");
+    }
+
+    pub(crate) fn push_best_frames(&mut self, left: &[f32], right: &[f32], chunk_size: usize) {
+        assert_eq!(left.len(), right.len());
+        self.push_js(&format!(
+            "const bestFrames = {{a: new Float32Array({:?}), b: new Float32Array({:?}), chunkSize: {}}};\n",
+            left, right, chunk_size
+        ));
     }
 
     fn push_js(&mut self, js: &str) {
