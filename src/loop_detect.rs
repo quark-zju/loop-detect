@@ -155,8 +155,37 @@ impl LoopDetector {
             });
         }
 
-        if let Some(lop) = loops.first_mut() {
+        // Fine tune, starting with the first loop.
+        let mut best_confidence = 0f32;
+        let mut best_index = 0;
+        let mut attempted = vec![false; loops.len()];
+        for i in 0..loops.len() {
+            if attempted[i] {
+                continue;
+            }
+            let lop = &mut loops[i];
             self.fine_tune(samples, lop);
+            if lop.confidence > best_confidence {
+                best_confidence = lop.confidence;
+                best_index = i;
+            }
+            if lop.confidence > 0.9 {
+                // Good enough. Do not try other potential loops.
+                break;
+            } else {
+                // Mark similiar "delta" loops as attempted.
+                let delta = lop.delta;
+                for j in i + 1..loops.len() {
+                    if loops[j].delta.abs_diff(delta) < 10 {
+                        attempted[j] = true;
+                    }
+                }
+            }
+        }
+
+        // Swap the loops so the "best confidence" is at the first.
+        if best_index > 0 {
+            loops.swap(0, best_index);
         }
 
         if let Some(vis) = self.vis.as_mut() {
