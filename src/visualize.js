@@ -1,4 +1,6 @@
-function render(data, hotPoints, loops, matches, bestFrames) {
+const fineTunes = [];
+
+function render(data, hotPoints, loops, matches) {
   const canvas = document.getElementById("canvas", { alpha: false });
   const ctx = canvas.getContext("2d");
   if (data.length === 0) {
@@ -59,8 +61,8 @@ function render(data, hotPoints, loops, matches, bestFrames) {
     });
   }
 
-  if (bestFrames != null) {
-    const { a, b, chunkSize } = bestFrames;
+  fineTunes.forEach((fineTune) => {
+    const { a, b, chunkSize, delta, confidence } = fineTune;
     const N = a.length / chunkSize;
 
     // Both a and b are Float32Array, with chunkSize * N length.
@@ -110,6 +112,12 @@ function render(data, hotPoints, loops, matches, bestFrames) {
     };
     const effectiveSize = chunkSize / 2;
     for (let i = 0; i < N; i++) {
+      tr("title`");
+      td(
+        `Fine tune: delta ${delta} => confidence ${confidence.toFixed(3)}`,
+        effectiveSize + 1
+      );
+
       tr("row-frame");
       td(`Frame ${i + 1}`, effectiveSize + 1);
 
@@ -132,5 +140,5 @@ function render(data, hotPoints, loops, matches, bestFrames) {
     }
 
     document.body.appendChild(domTable);
-  }
+  });
 }

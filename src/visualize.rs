@@ -11,7 +11,7 @@ pub struct Visualizer {
 
 static HEAD_JS: &str = include_str!("visualize.js");
 static TAIL_JS: &str =
-    "window.addEventListener('load', () => render(data, hotPoints, loops, matches, bestFrames));";
+    "window.addEventListener('load', () => render(data, hotPoints, loops, matches));";
 static STYLE: &str = include_str!("visualize.css");
 
 impl Visualizer {
@@ -71,11 +71,18 @@ impl Visualizer {
         self.push_js("]);\n");
     }
 
-    pub(crate) fn push_best_frames(&mut self, left: &[f32], right: &[f32], chunk_size: usize) {
+    pub(crate) fn push_fine_tune(
+        &mut self,
+        left: &[f32],
+        right: &[f32],
+        chunk_size: usize,
+        delta: usize,
+        confidence: f32,
+    ) {
         assert_eq!(left.len(), right.len());
         self.push_js(&format!(
-            "const bestFrames = {{a: new Float32Array({:?}), b: new Float32Array({:?}), chunkSize: {}}};\n",
-            left, right, chunk_size
+            "fineTunes.push({{a: new Float32Array({:?}), b: new Float32Array({:?}), chunkSize: {}, delta: {}, confidence: {}}});\n",
+            left, right, chunk_size, delta, confidence
         ));
     }
 

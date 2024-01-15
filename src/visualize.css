@@ -2,6 +2,10 @@ body {
   font-family: monospace;
 }
 
+tr.title {
+  background: #dddddd;
+}
+
 tr.row-frame {
   background: #eeeeee;
 }
