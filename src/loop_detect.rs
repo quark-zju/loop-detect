@@ -312,8 +312,8 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
         if max < 1e-3 {
             continue;
         }
-        // Attempt to scale to max = 100.
-        let scale = 200.0f32 / (max + 100.0);
+        // Attempt to scale to max = 100, with a log-scale volumn.
+        let scale = (100.0f32 + max.log10()) / max;
         for v in chunk.iter_mut().take(effective_size) {
             *v *= scale;
         }
