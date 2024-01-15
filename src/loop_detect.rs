@@ -164,7 +164,7 @@ impl LoopDetector {
                 continue;
             }
             let lop = &mut loops[i];
-            self.fine_tune(samples, lop);
+            fine_tune(&mut self.fine_fft, samples, lop, self.vis.as_mut());
             if lop.confidence > best_confidence {
                 best_confidence = lop.confidence;
                 best_index = i;
@@ -196,94 +196,99 @@ impl LoopDetector {
 
         loops
     }
+}
 
-    /// Slightly shift `lop.end` so it can better align with `start`.
-    pub fn fine_tune(&mut self, samples: &[i16], lop: &mut Loop) {
-        let fft = self.fine_fft.get_fft();
-        let chunk_size_bits = self.fine_fft.chunk_size_bits;
-        let chunk_size = self.fine_fft.chunk_size();
-        let scratch = self.fine_fft.get_scratch();
+/// Slightly shift `lop.end` so it can better align with `start`.
+fn fine_tune(
+    fine_fft: &mut OnceFft,
+    samples: &[i16],
+    lop: &mut Loop,
+    vis: Option<&mut Visualizer>,
+) {
+    let fft = fine_fft.get_fft();
+    let chunk_size_bits = fine_fft.chunk_size_bits;
+    let chunk_size = fine_fft.chunk_size();
+    let scratch = fine_fft.get_scratch();
 
-        // [##########]---------------------|----------|----------|
-        // ^start     ^start+compare_size   ^          ^end       ^
-        //                                  end_left      end_right
-        //                                       [##########]
-        //                                       ^best match
+    // [##########]---------------------|----------|----------|
+    // ^start     ^start+compare_size   ^          ^end       ^
+    //                                  end_left      end_right
+    //                                       [##########]
+    //                                       ^best match
 
-        // FFT for the start chunk.
-        let compare_chunk_count = ((samples.len() - lop.start) >> chunk_size_bits).min(256);
-        if compare_chunk_count < 3 {
-            return;
-        }
-        let compare_size = chunk_size * compare_chunk_count;
-        let fft_start_norm: Vec<f32> = {
-            let sample_start = match samples.get(lop.start..lop.start + compare_size) {
-                None => return,
-                Some(v) => v,
-            };
-            let mut fft_start_buffer: Vec<Complex<f32>> = sample_start
-                .iter()
-                .map(|i| Complex::new(*i as f32, 0.0f32))
-                .collect();
-            fft.process_with_scratch(&mut fft_start_buffer, scratch);
-            normalize_complex_chunks(&fft_start_buffer, chunk_size)
-        };
-
-        // Brute force search in range.
-        let end_left = lop
-            .end
-            .saturating_sub(chunk_size * compare_chunk_count)
-            .max(lop.start);
-        let end_right = end_left + chunk_size * 2 * compare_chunk_count;
-        let end_search_range: Vec<Complex<f32>> =
-            match samples.get(end_left..end_right + compare_size) {
-                None => return,
-                Some(v) => v.iter().map(|i| Complex::new(*i as f32, 0.0f32)).collect(),
-            };
-        let mut best_offset = lop.end - end_left;
-        let mut best_value = -1f32;
-        let search_start = 0;
-        let search_end = end_right - end_left;
-        let step = 1;
-        let mut fft_end_buffer: Vec<Complex<f32>> = Vec::with_capacity(chunk_size);
-        for i in (search_start..search_end).step_by(step) {
-            fft_end_buffer.clear();
-            let slice = match end_search_range.get(i..i + compare_size) {
-                None => break,
-                Some(v) => v,
-            };
-            fft_end_buffer.extend_from_slice(slice);
-            fft.process_with_scratch(&mut fft_end_buffer, scratch);
-
-            let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
-            let mut total_diff = 0.0f32;
-            let mut total_power = 0.0f32;
-            for (a, b) in fft_start_norm.iter().zip(buf) {
-                let diff = (a - b).abs();
-                total_diff += diff;
-                total_power += a.max(b);
-            }
-            let value = 1.0 - (total_diff / total_power);
-            assert!(value >= 0.0 && value <= 1.0);
-            if value > best_value {
-                best_value = value;
-                best_offset = i;
-            }
-        }
-
-        if let Some(vis) = self.vis.as_mut() {
-            fft_end_buffer.clear();
-            fft_end_buffer
-                .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
-            fft.process_with_scratch(&mut fft_end_buffer, scratch);
-            let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
-            vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, lop.delta, best_value);
-        }
-
-        let new_end = end_left + best_offset;
-        lop.end = new_end;
-        lop.confidence = best_value;
+    // FFT for the start chunk.
+    let compare_chunk_count = ((samples.len() - lop.start) >> chunk_size_bits).min(256);
+    if compare_chunk_count < 3 {
+        return;
     }
+    let compare_size = chunk_size * compare_chunk_count;
+    let fft_start_norm: Vec<f32> = {
+        let sample_start = match samples.get(lop.start..lop.start + compare_size) {
+            None => return,
+            Some(v) => v,
+        };
+        let mut fft_start_buffer: Vec<Complex<f32>> = sample_start
+            .iter()
+            .map(|i| Complex::new(*i as f32, 0.0f32))
+            .collect();
+        fft.process_with_scratch(&mut fft_start_buffer, scratch);
+        normalize_complex_chunks(&fft_start_buffer, chunk_size)
+    };
+
+    // Brute force search in range.
+    let end_left = lop
+        .end
+        .saturating_sub(chunk_size * compare_chunk_count)
+        .max(lop.start);
+    let end_right = end_left + chunk_size * 2 * compare_chunk_count;
+    let end_search_range: Vec<Complex<f32>> = match samples.get(end_left..end_right + compare_size)
+    {
+        None => return,
+        Some(v) => v.iter().map(|i| Complex::new(*i as f32, 0.0f32)).collect(),
+    };
+    let mut best_offset = lop.end - end_left;
+    let mut best_value = -1f32;
+    let search_start = 0;
+    let search_end = end_right - end_left;
+    let step = 1;
+    let mut fft_end_buffer: Vec<Complex<f32>> = Vec::with_capacity(chunk_size);
+    for i in (search_start..search_end).step_by(step) {
+        fft_end_buffer.clear();
+        let slice = match end_search_range.get(i..i + compare_size) {
+            None => break,
+            Some(v) => v,
+        };
+        fft_end_buffer.extend_from_slice(slice);
+        fft.process_with_scratch(&mut fft_end_buffer, scratch);
+
+        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
+        let mut total_diff = 0.0f32;
+        let mut total_power = 0.0f32;
+        for (a, b) in fft_start_norm.iter().zip(buf) {
+            let diff = (a - b).abs();
+            total_diff += diff;
+            total_power += a.max(b);
+        }
+        let value = 1.0 - (total_diff / total_power);
+        assert!(value >= 0.0 && value <= 1.0);
+        if value > best_value {
+            best_value = value;
+            best_offset = i;
+        }
+    }
+
+    if let Some(vis) = vis {
+        fft_end_buffer.clear();
+        fft_end_buffer
+            .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
+        fft.process_with_scratch(&mut fft_end_buffer, scratch);
+        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
+        vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, lop.delta, best_value);
+    }
+
+    let new_end = end_left + best_offset;
+    lop.end = new_end;
+    lop.confidence = best_value;
 }
 
 fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32> {
