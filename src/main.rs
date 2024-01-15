@@ -137,18 +137,19 @@ fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadable
     let mut info = ProbeInfo::default();
     if opts.play {
         // Loop analysis only needs 1 channel. Only read both channels with --play.
-        info = ffmpeg::probe(&input_file).unwrap_or(info);
+        info = ffmpeg::probe(input_file).unwrap_or(info);
     }
 
     vprintln!(
         opts,
-        "Decoding ({} Hz, {} channels)...",
+        "{}: Decoding ({} Hz, {} channels)...",
+        input_file,
         &info.sample_rate,
         info.channels
     );
-    let samples = ffmpeg::decode(&input_file, info)?;
+    let samples = ffmpeg::decode(input_file, info)?;
 
-    vprintln!(opts, "Finding loops...");
+    vprintln!(opts, "{}: Finding loops...", input_file);
     let mut detector = loop_detect::LoopDetector::new();
     if opts.debug {
         detector = detector.enable_visualizer();
@@ -160,8 +161,8 @@ fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadable
 
     if let Some(vis) = detector.vis.as_ref() {
         let html = vis.export_html();
-        let file_name = format!("{}.html", &input_file);
-        vprintln!(opts, "Writing debug HTML: {}", &file_name);
+        let file_name = format!("{}.html", input_file);
+        vprintln!(opts, "{}: Writing debug HTML: {}", input_file, &file_name);
         fs::write(&file_name, html)?;
     }
 
@@ -175,7 +176,8 @@ fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadable
             if opts.play {
                 vprintln!(
                     opts,
-                    "Playing with loop [{} to {} secs, confidence: {}].",
+                    "{}: Playing with loop [{} to {} secs, confidence: {}].",
+                    input_file,
                     human_loop.start,
                     human_loop.end,
                     human_loop.confidence
@@ -191,7 +193,7 @@ fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadable
             Ok(Some(human_loop))
         }
         _ => {
-            vprintln!(opts, "No loop found");
+            vprintln!(opts, "{}: No loop found", input_file);
             Ok(None)
         }
     }
