@@ -383,9 +383,9 @@ pub(crate) fn pick_start(
     assert!(!starts.is_empty());
 
     // Find the "best" by sliding and comparing N frames.
-    // By default N = 4, chunk_size_bits = 11, for 44k Hz audio,
-    // the N frames cover: (N << chunk_size_bits) / 44100 = 0.18s.
-    const N: usize = 4;
+    // By default N = 8, chunk_size_bits = 11, for 44k Hz audio,
+    // the N frames cover: (N << chunk_size_bits) / 44100 = 0.37s.
+    const N: usize = 8;
 
     starts.sort_unstable();
     let mut rolling_index = 0;
