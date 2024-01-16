@@ -175,7 +175,6 @@ fn find_potential_loops(
             // Skip "similar" loops.
             continue;
         }
-        dbg!(c.count, c.delta);
         let (start, start_confidence) = pick_start(c.starts, &fft_buffer, c.delta, chunk_size_bits);
         let start = start << chunk_size_bits;
         let end = start + (c.delta << chunk_size_bits);
