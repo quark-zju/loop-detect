@@ -284,18 +284,21 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
     let mut buf: Vec<f32> = buf.into_iter().map(|v| v.norm()).collect();
     // normalize each chunk so volumn (ex. fade out) affects comparsion less.
     let effective_size = chunk_size / 2;
+    let low_freq = (effective_size >> 8).max(1);
+    let high_freq = effective_size - (effective_size >> 2);
+    let band = 22050 / chunk_size;
     for chunk in buf.chunks_exact_mut(chunk_size) {
         // zero low-freq noise.
-        for v in chunk.iter_mut().take(chunk_size >> 8) {
-            *v = 0.0;
-        }
         // zero high-freq potential noise (ex. MP3 artifacts).
-        for v in chunk
-            .iter_mut()
-            .skip(effective_size - (effective_size >> 2))
-        {
-            *v = 0.0;
+        // scale by log(freq).
+        for (i, v) in chunk.iter_mut().enumerate() {
+            if i >= high_freq || i < low_freq {
+                *v = 0.0;
+            } else {
+                *v *= (((i + 1) * band) as f32).log2();
+            }
         }
+        // Find max.
         let mut max: f32 = 0.0;
         for &v in chunk.iter().take(effective_size) {
             if v > max {
