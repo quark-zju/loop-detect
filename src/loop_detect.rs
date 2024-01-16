@@ -160,7 +160,7 @@ fn find_potential_loops(
         }
         let start = pick_start(c.starts, &fft_buffer, c.delta, chunk_size_bits) << chunk_size_bits;
         let end = start + (c.delta << chunk_size_bits);
-        let (end, confidence) = fine_tune(fine_fft, samples, start, end, vis);
+        let (end, confidence) = fine_tune(fft.chunk_size(), fine_fft, samples, start, end, vis);
         let delta = c.delta;
         if confidence > best_confidence {
             best_confidence = confidence;
@@ -196,6 +196,7 @@ fn find_potential_loops(
 /// Both `start` and `end` are in FFT frame.
 /// Returns `(end, confidence)`.
 fn fine_tune(
+    rough_chunk_size: usize,
     fine_fft: &mut OnceFft,
     samples: &[i16],
     start: usize,
@@ -214,9 +215,7 @@ fn fine_tune(
     //                                       ^best match
 
     // FFT for the start chunk.
-    let compare_chunk_count = ((samples.len() - start) >> chunk_size_bits)
-        .min(1 << chunk_size_bits)
-        .min(256);
+    let compare_chunk_count = rough_chunk_size * 4 >> chunk_size_bits;
     if compare_chunk_count < 3 {
         return (end, 0.0);
     }
