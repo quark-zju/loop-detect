@@ -228,7 +228,7 @@ fn fine_tune(
     //                                       ^best match
 
     // FFT for the start chunk.
-    let compare_chunk_count = rough_chunk_size * 4 >> chunk_size_bits;
+    let compare_chunk_count = rough_chunk_size >> chunk_size_bits;
     if compare_chunk_count < 3 {
         return (end, 0.0);
     }
@@ -247,10 +247,8 @@ fn fine_tune(
     };
 
     // Brute force search in range.
-    let end_left = end
-        .saturating_sub(chunk_size * compare_chunk_count)
-        .max(start);
-    let end_right = end_left + chunk_size * 2 * compare_chunk_count;
+    let end_left = end.saturating_sub(compare_size).max(start);
+    let end_right = end + compare_size;
     let end_search_range: Vec<Complex<f32>> = match samples.get(end_left..end_right + compare_size)
     {
         None => return (end, 0.0),
