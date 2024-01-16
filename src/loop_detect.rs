@@ -94,6 +94,10 @@ fn find_potential_loops(
         let hot_bands = find_hot_bands(chunk);
         for &last_band in last_hot_bands.as_slice() {
             for &band in hot_bands.as_slice() {
+                if last_band.abs_diff(band) <= 2 {
+                    // Skip similar band -> band changes.
+                    continue;
+                }
                 let full_hash: u64 = (last_band as u64) | ((band as u64).wrapping_shl(32));
                 match hash_to_timestamp.entry(full_hash) {
                     Entry::Occupied(mut e) => {
