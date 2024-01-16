@@ -388,18 +388,31 @@ pub(crate) fn pick_start(
     const N: usize = 4;
 
     starts.sort_unstable();
+    let mut rolling_index = 0;
+    let mut rolling_values = [0f32; N];
+    let mut rolling_total = 0f32;
     let mut last_start = 0;
     let mut best_value = 0f32;
     let mut best_offset = starts.first().copied().unwrap_or_default();
     for &mut start in starts {
         if start <= last_start {
+            // Handled before.
             continue;
         }
 
-        let end = start + delta_frame;
+        if start >= last_start + 3 {
+            // Gap is too large. Reset rolling values.
+            rolling_values = Default::default();
+            rolling_total = 0.0;
+            rolling_index = 0;
+        }
 
-        let start_range = (start << chunk_size_bits)..((start + N) << chunk_size_bits);
-        let end_range = (end << chunk_size_bits)..((end + N) << chunk_size_bits);
+        let end = last_start + delta_frame;
+        // [ ---- ]           [ ---- ]
+        //        ^ start     ^ end (last_start + delta)
+        // ^ last_start
+        let start_range = (last_start << chunk_size_bits)..(start << chunk_size_bits);
+        let end_range = (end << chunk_size_bits)..((end + start - last_start) << chunk_size_bits);
         let a = match fft_buffer.get(start_range) {
             None => break,
             Some(v) => v,
@@ -408,10 +421,19 @@ pub(crate) fn pick_start(
             None => break,
             Some(v) => v,
         };
+
         let value = calculate_similarity(a, b);
-        if value > best_value {
-            best_value = value;
-            best_offset = start;
+        let old_value = rolling_values[rolling_index];
+        rolling_values[rolling_index] = value;
+        rolling_total += value - old_value;
+        rolling_index += 1;
+        if rolling_index >= N {
+            rolling_index = 0;
+        }
+
+        if rolling_total > best_value {
+            best_value = rolling_total;
+            best_offset = last_start.saturating_sub(N - 1);
         }
 
         last_start = start;
