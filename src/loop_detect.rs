@@ -50,9 +50,7 @@ impl LoopDetector {
     }
 
     pub fn find_loops(&mut self, samples: &[i16]) -> Vec<Loop> {
-        let loops = find_potential_loops(&mut self.fft, samples, &mut self.vis);
-        let loops = fine_tune_loops(&mut self.fine_fft, samples, loops, &mut self.vis);
-        loops
+        find_potential_loops(&mut self.fft, &mut self.fine_fft, samples, &mut self.vis)
     }
 }
 
@@ -60,6 +58,7 @@ impl LoopDetector {
 /// `samples` should be Mono. Use `maybe_downmix` to convert Stereo to Mono.
 fn find_potential_loops(
     fft: &mut OnceFft,
+    fine_fft: &mut OnceFft,
     samples: &[i16],
     vis: &mut Option<Visualizer>,
 ) -> Vec<Loop> {
@@ -149,71 +148,44 @@ fn find_potential_loops(
         Some(v) => v.count / 2,
     };
 
+    let mut best_confidence = 0f32;
+    let mut best_index = 0;
     for c in &mut counts {
         if c.count < count_threshold {
             break;
         }
+        if loops.iter().any(|l| l.delta.abs_diff(c.delta) < 10) {
+            // Skip "similar" loops.
+            continue;
+        }
         let start = pick_start(c.starts, &fft_buffer, c.delta, chunk_size_bits) << chunk_size_bits;
         let end = start + (c.delta << chunk_size_bits);
-        // confidence will be adjusted by fine_tune.
-        let confidence = 0.0;
+        let (end, confidence) = fine_tune(fine_fft, samples, start, end, vis);
         let delta = c.delta;
+        if confidence > best_confidence {
+            best_confidence = confidence;
+            best_index = loops.len();
+        }
         loops.push(Loop {
             start,
             end,
             confidence,
             delta,
         });
+        if confidence > 0.9 {
+            // Good enough. Do not try other loops.
+            break;
+        }
+    }
+
+    if best_index > 0 {
+        // Move the best loop to the front.
+        loops.swap(0, best_index);
     }
 
     if let Some(vis) = vis {
         vis.push_fft_data(&fft_buffer, chunk_size);
         vis.push_matches(&delta_to_starts);
-    }
-
-    loops
-}
-
-fn fine_tune_loops(
-    fine_fft: &mut OnceFft,
-    samples: &[i16],
-    mut loops: Vec<Loop>,
-    vis: &mut Option<Visualizer>,
-) -> Vec<Loop> {
-    // Fine tune, starting with the first loop.
-    let mut best_confidence = 0f32;
-    let mut best_index = 0;
-    let mut attempted = vec![false; loops.len()];
-    for i in 0..loops.len() {
-        if attempted[i] {
-            continue;
-        }
-        let lop = &mut loops[i];
-        fine_tune(fine_fft, samples, lop, vis);
-        if lop.confidence > best_confidence {
-            best_confidence = lop.confidence;
-            best_index = i;
-        }
-        if lop.confidence > 0.9 {
-            // Good enough. Do not try other potential loops.
-            break;
-        } else {
-            // Mark similiar "delta" loops as attempted.
-            let delta = lop.delta;
-            for j in i + 1..loops.len() {
-                if loops[j].delta.abs_diff(delta) < 10 {
-                    attempted[j] = true;
-                }
-            }
-        }
-    }
-
-    // Swap the loops so the "best confidence" is at the first.
-    if best_index > 0 {
-        loops.swap(0, best_index);
-    }
-
-    if let Some(vis) = vis.as_mut() {
         vis.push_loops(&loops);
     }
 
