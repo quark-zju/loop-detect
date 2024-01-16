@@ -4,6 +4,7 @@ use rustfft::Fft;
 use rustfft::FftPlanner;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -93,39 +94,47 @@ fn find_potential_loops(
     let mut delta_to_starts: HashMap<usize, Vec<usize>> = Default::default();
 
     let min_time_delta = chunk_len / 2;
-    let mut last_hot_bands = HotBands::default();
+    const LAST_FRAME_BITS: usize = 2;
+    const LAST_FRAME_COUNT: usize = 1 << LAST_FRAME_BITS;
+    let mut last_hot_bands_deq: VecDeque<HotBands> =
+        (0..LAST_FRAME_COUNT).map(|_| HotBands::default()).collect();
     for (i, chunk) in fft_buffer.chunks_exact(chunk_size).enumerate() {
         let hot_bands = find_hot_bands(chunk);
-        for &last_band in last_hot_bands.as_slice() {
-            for &band in hot_bands.as_slice() {
-                if last_band.abs_diff(band) <= 2 {
-                    // Skip similar band -> band changes.
-                    continue;
-                }
-                let full_hash: u64 = (last_band as u64) | ((band as u64).wrapping_shl(32));
-                match hash_to_timestamp.entry(full_hash) {
-                    Entry::Occupied(mut e) => {
-                        // Avoid O(N^2) by limiting the count of previous samples.
-                        const MAX_PREVIOUS: usize = 60;
-                        for &previous_timestamp in e.get().iter().take(MAX_PREVIOUS) {
-                            let delta = i - previous_timestamp;
-                            // Exclude too short loops.
-                            if delta > min_time_delta {
-                                delta_to_starts
-                                    .entry(delta)
-                                    .or_default()
-                                    .push(previous_timestamp);
-                            }
-                        }
-                        e.get_mut().push(i);
+        for (j, last_hot_bands) in last_hot_bands_deq.iter().enumerate() {
+            for &last_band in last_hot_bands.as_slice() {
+                for &band in hot_bands.as_slice() {
+                    if last_band.abs_diff(band) <= 2 {
+                        // Skip similar band -> band changes.
+                        continue;
                     }
-                    Entry::Vacant(e) => {
-                        e.insert(vec![i]);
+                    let full_hash: u64 = (((last_band as u64) | ((band as u64).wrapping_shl(30)))
+                        << LAST_FRAME_BITS)
+                        | (j as u64);
+                    match hash_to_timestamp.entry(full_hash) {
+                        Entry::Occupied(mut e) => {
+                            // Avoid O(N^2) by limiting the count of previous samples.
+                            const MAX_PREVIOUS: usize = 60;
+                            for &previous_timestamp in e.get().iter().take(MAX_PREVIOUS) {
+                                let delta = i - previous_timestamp;
+                                // Exclude too short loops.
+                                if delta > min_time_delta {
+                                    delta_to_starts
+                                        .entry(delta)
+                                        .or_default()
+                                        .push(previous_timestamp);
+                                }
+                            }
+                            e.get_mut().push(i);
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert(vec![i]);
+                        }
                     }
                 }
             }
         }
-        last_hot_bands = hot_bands;
+        last_hot_bands_deq.pop_front();
+        last_hot_bands_deq.push_back(hot_bands);
     }
 
     // Find the max count in `delta_to_starts`.
