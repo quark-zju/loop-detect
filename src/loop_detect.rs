@@ -20,6 +20,8 @@ pub struct Loop {
     pub end_confidence: f32,
     /// For debugging purpose. Related to `end - start` but not the same.
     pub(crate) delta: usize,
+    /// For debugging purpose. Hash matches.
+    pub(crate) votes: usize,
 }
 
 /// States for loop detection.
@@ -181,6 +183,7 @@ fn find_potential_loops(
             start_confidence,
             end_confidence,
             delta,
+            votes: c.count,
         });
         if end_confidence > 0.9 {
             // Good enough. Do not try other loops.
