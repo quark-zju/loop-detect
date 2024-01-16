@@ -474,22 +474,6 @@ fn calculate_similarity(a: &[f32], b: &[f32]) -> f32 {
     1.0 - (total_diff / total_power)
 }
 
-#[allow(dead_code)]
-fn best_similiarity(a: &[f32], sliding_b: &[f32]) -> (f32, usize) {
-    let mut best_value = 0.0f32;
-    let mut best_offset = 0;
-    assert!(sliding_b.len() >= a.len());
-    for i in 0..=(sliding_b.len() - a.len()) {
-        let b = &sliding_b[i..i + a.len()];
-        let value = calculate_similarity(a, b);
-        if value > best_value {
-            best_value = value;
-            best_offset = i;
-        }
-    }
-    (best_value, best_offset)
-}
-
 #[derive(Copy, Clone, Default)]
 pub(crate) struct HotBands {
     pub len: usize,
