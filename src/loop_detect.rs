@@ -272,7 +272,7 @@ fn fine_tune(
             .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
         afft.process_with_scratch(&mut fft_end_buffer, scratch);
         let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
-        vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, end - start, best_value);
+        vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, best_value);
     }
 
     let new_end = end_left + best_offset;

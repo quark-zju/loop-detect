@@ -63,7 +63,7 @@ function render(data, hotPoints, loops, matches) {
   }
 
   fineTunes.forEach((fineTune) => {
-    const { a, b, chunkSize, delta, confidence } = fineTune;
+    const { a, b, chunkSize, confidence } = fineTune;
     const N = a.length / chunkSize;
 
     // Both a and b are Float32Array, with chunkSize * N length.
@@ -114,7 +114,7 @@ function render(data, hotPoints, loops, matches) {
     const effectiveSize = chunkSize / 2;
     tr("title");
     td(
-      `Fine tune: delta ${delta} => confidence ${confidence.toFixed(3)}`,
+      `Fine tune: confidence ${confidence.toFixed(3)}`,
       effectiveSize + 1
     );
 

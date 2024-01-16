@@ -72,13 +72,12 @@ impl Visualizer {
         left: &[f32],
         right: &[f32],
         chunk_size: usize,
-        delta: usize,
         confidence: f32,
     ) {
         assert_eq!(left.len(), right.len());
         self.push_js(&format!(
-            "fineTunes.push({{a: new Float32Array({:?}), b: new Float32Array({:?}), chunkSize: {}, delta: {}, confidence: {}}});\n",
-            left, right, chunk_size, delta, confidence
+            "fineTunes.push({{a: new Float32Array({:?}), b: new Float32Array({:?}), chunkSize: {}, confidence: {}}});\n",
+            left, right, chunk_size, confidence
         ));
     }
 
