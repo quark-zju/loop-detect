@@ -14,8 +14,10 @@ pub struct Loop {
     pub start: usize,
     /// Exclusive. Index of samples.
     pub end: usize,
-    /// Rough confidence of the loop.
-    pub confidence: f32,
+    /// The confidence of the "start" (on the "rough" FFT).
+    pub start_confidence: f32,
+    /// Rough confidence of the loop (on the "fine" FFT).
+    pub end_confidence: f32,
     /// For debugging purpose. Related to `end - start` but not the same.
     pub(crate) delta: usize,
 }
@@ -162,21 +164,25 @@ fn find_potential_loops(
             // Skip "similar" loops.
             continue;
         }
-        let start = pick_start(c.starts, &fft_buffer, c.delta, chunk_size_bits) << chunk_size_bits;
+        dbg!(c.count, c.delta);
+        let (start, start_confidence) = pick_start(c.starts, &fft_buffer, c.delta, chunk_size_bits);
+        let start = start << chunk_size_bits;
         let end = start + (c.delta << chunk_size_bits);
-        let (end, confidence) = fine_tune(fft.chunk_size(), fine_fft, samples, start, end, vis);
+        let (end, end_confidence) = fine_tune(fft.chunk_size(), fine_fft, samples, start, end, vis);
         let delta = c.delta;
-        if confidence > best_confidence {
-            best_confidence = confidence;
+        let overall_confidence = end_confidence * 0.7 + start_confidence * 0.3;
+        if overall_confidence > best_confidence {
+            best_confidence = overall_confidence;
             best_index = loops.len();
         }
         loops.push(Loop {
             start,
             end,
-            confidence,
+            start_confidence,
+            end_confidence,
             delta,
         });
-        if confidence > 0.9 {
+        if end_confidence > 0.9 {
             // Good enough. Do not try other loops.
             break;
         }
@@ -390,7 +396,7 @@ pub(crate) fn pick_start(
     fft_buffer: &[f32],
     delta_frame: usize,
     chunk_size_bits: u8,
-) -> usize {
+) -> (usize, f32) {
     assert!(!starts.is_empty());
 
     // Find the "best" by sliding and comparing N frames.
@@ -450,7 +456,7 @@ pub(crate) fn pick_start(
         last_start = start;
     }
 
-    best_offset
+    (best_offset, best_value / N as f32)
 }
 
 fn calculate_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -504,7 +510,7 @@ impl fmt::Debug for Loop {
         f.debug_struct("Loop")
             .field("start", &self.start)
             .field("len", &(self.end - self.start))
-            .field("confidence", &self.confidence)
+            .field("confidence", &self.end_confidence)
             .finish()
     }
 }

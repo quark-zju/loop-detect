@@ -64,8 +64,8 @@ impl Visualizer {
         self.push_js("const loops = [\n");
         for l in loops {
             self.push_js(&format!(
-                "  {{start: {}, end: {}, confidence: {}, delta: {}}},\n",
-                l.start, l.end, l.confidence, l.delta
+                "  {{start: {}, end: {}, confidence: [{}, {}], delta: {}, votes: {}}},\n",
+                l.start, l.end, l.start_confidence, l.end_confidence, l.delta, l.votes
             ));
         }
         self.push_js("];\n");

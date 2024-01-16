@@ -157,11 +157,11 @@ fn process_one(input_file: &str, opts: &Opts) -> io::Result<Option<HumanReadable
     }
 
     match loops.first() {
-        Some(lop) if lop.confidence > MINIMAL_CONFIDENCE => {
+        Some(lop) if lop.end_confidence > MINIMAL_CONFIDENCE => {
             let human_loop = HumanReadableLoop {
                 start: lop.start as f32 / info.sample_rate as f32,
                 end: lop.end as f32 / info.sample_rate as f32,
-                confidence: lop.confidence,
+                confidence: lop.end_confidence,
             };
             if opts.play {
                 vprintln!(
