@@ -31,6 +31,18 @@ impl Visualizer {
     pub(crate) fn push_fft_data(&mut self, data: &[f32], chunk_size: usize) {
         self.push_js("const data = [\n");
         let mut hot_points_str = String::new();
+        // Normalize to 0..128.
+        let mut max = 0f32;
+        for &v in data {
+            if v > max {
+                max = v;
+            }
+        }
+        let mut data = data.to_owned();
+        let scale = 128.0 / max;
+        for v in &mut data {
+            *v *= scale;
+        }
         for chunk in data.chunks_exact(chunk_size) {
             let hot_points = find_hot_bands(chunk);
             hot_points_str.push_str(&format!("{:?},", hot_points.as_slice()));

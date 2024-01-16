@@ -82,7 +82,7 @@ fn find_potential_loops(
         .collect();
     let afft = fft.get_fft();
     afft.process_with_scratch(&mut fft_buffer, &mut fft.get_scratch());
-    let fft_buffer = normalize_complex_chunks(&fft_buffer, chunk_size);
+    let fft_buffer = normalize_complex_chunks(&fft_buffer, chunk_size, false);
 
     // Figure out `hash_to_timestamp` and `delta_to_starts`.
     let mut hash_to_timestamp: HashMap<u64, Vec<usize>> = Default::default();
@@ -231,7 +231,7 @@ fn fine_tune(
             .map(|i| Complex::new(*i as f32, 0.0f32))
             .collect();
         afft.process_with_scratch(&mut fft_start_buffer, scratch);
-        normalize_complex_chunks(&fft_start_buffer, chunk_size)
+        normalize_complex_chunks(&fft_start_buffer, chunk_size, true)
     };
 
     // Brute force search in range.
@@ -259,7 +259,7 @@ fn fine_tune(
         fft_end_buffer.extend_from_slice(slice);
         afft.process_with_scratch(&mut fft_end_buffer, scratch);
 
-        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
+        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size, true);
         let value = calculate_similarity(&fft_start_norm, &buf);
         assert!(value >= 0.0 && value <= 1.0);
         if value > best_value {
@@ -273,7 +273,7 @@ fn fine_tune(
         fft_end_buffer
             .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
         afft.process_with_scratch(&mut fft_end_buffer, scratch);
-        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
+        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size, true);
         vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, best_value);
     }
 
@@ -281,7 +281,11 @@ fn fine_tune(
     (new_end, best_value)
 }
 
-fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32> {
+fn normalize_complex_chunks(
+    buf: &[Complex<f32>],
+    chunk_size: usize,
+    normalize_volume: bool,
+) -> Vec<f32> {
     // complex -> f32
     let mut buf: Vec<f32> = buf.into_iter().map(|v| v.norm()).collect();
     // normalize each chunk so volumn (ex. fade out) affects comparsion less.
@@ -300,20 +304,22 @@ fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32>
                 *v *= (((i + 1) * band) as f32).log2();
             }
         }
-        // Find max.
-        let mut max: f32 = 0.0;
-        for &v in chunk.iter().take(effective_size) {
-            if v > max {
-                max = v;
+        if normalize_volume {
+            // Find max.
+            let mut max: f32 = 0.0;
+            for &v in chunk.iter().take(effective_size) {
+                if v > max {
+                    max = v;
+                }
             }
-        }
-        if max < 1e-3 {
-            continue;
-        }
-        // Attempt to scale to max = 100, with a log-scale volumn.
-        let scale = (100.0f32 + max.log10() * 2.0) / max;
-        for v in chunk.iter_mut().take(effective_size) {
-            *v *= scale;
+            if max < 1e-3 {
+                continue;
+            }
+            // Attempt to scale to max = 100, with a log-scale volumn.
+            let scale = (100.0f32 + max.log10() * 2.0) / max;
+            for v in chunk.iter_mut().take(effective_size) {
+                *v *= scale;
+            }
         }
     }
     buf
