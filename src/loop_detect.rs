@@ -214,7 +214,9 @@ fn fine_tune(
     //                                       ^best match
 
     // FFT for the start chunk.
-    let compare_chunk_count = ((samples.len() - start) >> chunk_size_bits).min(256);
+    let compare_chunk_count = ((samples.len() - start) >> chunk_size_bits)
+        .min(1 << chunk_size_bits)
+        .min(256);
     if compare_chunk_count < 3 {
         return (end, 0.0);
     }
