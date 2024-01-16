@@ -261,7 +261,8 @@ fn fine_tune(
     let search_start = 0;
     let search_end = end_right - end_left;
     let step = 1;
-    let mut fft_end_buffer: Vec<Complex<f32>> = Vec::with_capacity(chunk_size);
+    let mut fft_end_buffer: Vec<Complex<f32>> = Vec::with_capacity(compare_size);
+    let mut buf: Vec<f32> = vec![0f32; compare_size];
     for i in (search_start..search_end).step_by(step) {
         fft_end_buffer.clear();
         let slice = match end_search_range.get(i..i + compare_size) {
@@ -271,7 +272,7 @@ fn fine_tune(
         fft_end_buffer.extend_from_slice(slice);
         afft.process_with_scratch(&mut fft_end_buffer, scratch);
 
-        let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size, true);
+        normalize_complex_chunks_in_place(&fft_end_buffer, &mut buf, chunk_size, true);
         let value = calculate_similarity(&fft_start_norm, &buf);
         assert!(value >= 0.0 && value <= 1.0);
         if value > best_value {
@@ -293,13 +294,7 @@ fn fine_tune(
     (new_end, best_value)
 }
 
-fn normalize_complex_chunks(
-    buf: &[Complex<f32>],
-    chunk_size: usize,
-    normalize_volume: bool,
-) -> Vec<f32> {
-    // complex -> f32
-    let mut buf: Vec<f32> = buf.into_iter().map(|v| v.norm()).collect();
+fn normalize_f32_chunks_in_place(buf: &mut [f32], chunk_size: usize, normalize_volume: bool) {
     // normalize each chunk so volumn (ex. fade out) affects comparsion less.
     let effective_size = chunk_size / 2;
     let low_freq = (effective_size >> 8).max(1);
@@ -334,6 +329,30 @@ fn normalize_complex_chunks(
             }
         }
     }
+}
+
+fn normalize_complex_chunks_in_place(
+    buf: &[Complex<f32>],
+    out_buf: &mut [f32],
+    chunk_size: usize,
+    normalize_volume: bool,
+) {
+    assert_eq!(buf.len(), out_buf.len());
+    // complex -> f32
+    for i in 0..buf.len() {
+        out_buf[i] = buf[i].norm();
+    }
+    normalize_f32_chunks_in_place(out_buf, chunk_size, normalize_volume);
+}
+
+fn normalize_complex_chunks(
+    buf: &[Complex<f32>],
+    chunk_size: usize,
+    normalize_volume: bool,
+) -> Vec<f32> {
+    // complex -> f32
+    let mut buf: Vec<f32> = buf.into_iter().map(|v| v.norm()).collect();
+    normalize_f32_chunks_in_place(&mut buf, chunk_size, normalize_volume);
     buf
 }
 
