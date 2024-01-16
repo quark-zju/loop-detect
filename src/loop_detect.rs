@@ -220,13 +220,16 @@ fn fine_tune_loops(
     loops
 }
 
-/// Slightly shift `lop.end` so it can better align with `start`.
+/// Slightly shift `end` so it can better align with `start`.
+/// Both `start` and `end` are in FFT frame.
+/// Returns `(end, confidence)`.
 fn fine_tune(
     fine_fft: &mut OnceFft,
     samples: &[i16],
-    lop: &mut Loop,
+    start: usize,
+    end: usize,
     vis: &mut Option<Visualizer>,
-) {
+) -> (usize, f32) {
     let afft = fine_fft.get_fft();
     let chunk_size_bits = fine_fft.chunk_size_bits;
     let chunk_size = fine_fft.chunk_size();
@@ -239,14 +242,14 @@ fn fine_tune(
     //                                       ^best match
 
     // FFT for the start chunk.
-    let compare_chunk_count = ((samples.len() - lop.start) >> chunk_size_bits).min(256);
+    let compare_chunk_count = ((samples.len() - start) >> chunk_size_bits).min(256);
     if compare_chunk_count < 3 {
-        return;
+        return (end, 0.0);
     }
     let compare_size = chunk_size * compare_chunk_count;
     let fft_start_norm: Vec<f32> = {
-        let sample_start = match samples.get(lop.start..lop.start + compare_size) {
-            None => return,
+        let sample_start = match samples.get(start..start + compare_size) {
+            None => return (end, 0.0),
             Some(v) => v,
         };
         let mut fft_start_buffer: Vec<Complex<f32>> = sample_start
@@ -258,17 +261,16 @@ fn fine_tune(
     };
 
     // Brute force search in range.
-    let end_left = lop
-        .end
+    let end_left = end
         .saturating_sub(chunk_size * compare_chunk_count)
-        .max(lop.start);
+        .max(start);
     let end_right = end_left + chunk_size * 2 * compare_chunk_count;
     let end_search_range: Vec<Complex<f32>> = match samples.get(end_left..end_right + compare_size)
     {
-        None => return,
+        None => return (end, 0.0),
         Some(v) => v.iter().map(|i| Complex::new(*i as f32, 0.0f32)).collect(),
     };
-    let mut best_offset = lop.end - end_left;
+    let mut best_offset = end - end_left;
     let mut best_value = -1f32;
     let search_start = 0;
     let search_end = end_right - end_left;
@@ -298,12 +300,11 @@ fn fine_tune(
             .extend_from_slice(&end_search_range[best_offset..best_offset + compare_size]);
         afft.process_with_scratch(&mut fft_end_buffer, scratch);
         let buf = normalize_complex_chunks(&fft_end_buffer, chunk_size);
-        vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, lop.delta, best_value);
+        vis.push_fine_tune(&fft_start_norm, &buf, chunk_size, end - start, best_value);
     }
 
     let new_end = end_left + best_offset;
-    lop.end = new_end;
-    lop.confidence = best_value;
+    (new_end, best_value)
 }
 
 fn normalize_complex_chunks(buf: &[Complex<f32>], chunk_size: usize) -> Vec<f32> {
