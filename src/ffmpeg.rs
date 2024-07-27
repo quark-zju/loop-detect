@@ -76,6 +76,14 @@ impl ProbeInfo {
     fn sample_count_seconds(&self, seconds: f64) -> usize {
         ((self.sample_rate as f64 * seconds) as usize) * self.channels
     }
+
+    fn channel_layout(&self) -> &str {
+        match self.channels {
+            1 => "mono",
+            2 => "stereo",
+            v => panic!("unable to convert channel count {} to layout", v),
+        }
+    }
 }
 
 /// Find the sample rate via the `ffprobe` executable.
@@ -114,9 +122,9 @@ pub fn play(samples: impl IntoIterator<Item = i16>, info: ProbeInfo) -> io::Resu
             "s16le",
             "-i",
             "-",
-            "-ac",
+            "-ch_layout",
         ])
-        .arg(info.channels.to_string())
+        .arg(info.channel_layout())
         .arg("-ar")
         .arg(info.sample_rate.to_string())
         .stdin(Stdio::piped())
